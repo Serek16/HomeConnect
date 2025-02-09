@@ -1,12 +1,19 @@
 #include <WiFi.h>
 #include <MQTTClient.h>
 #include <ArduinoJson.h>
+#include <WiFiUdp.h>
+#include <WakeOnLan.h>
 #include "MyCredentials.h"
 
-const int PUBLISH_INTERVAL = 5000; // 5 seconds
+const int PUBLISH_INTERVAL = 5*60*1000; // 5 minutes
+const char* WAKE_ON_LAN_TOPIC   = "wake-on-lan";
+const char* WAKE_ON_LAN_MESSAGE = "on";
 
 WiFiClient network;
 MQTTClient mqtt = MQTTClient(256);
+
+WiFiUDP UDP;
+WakeOnLan WOL(UDP);
 
 unsigned long lastPublishTime = 0;
 
@@ -21,6 +28,9 @@ void setup() {
     printf(".");
   }
   printf("\nSuccessfully connected\n");
+
+  WOL.setRepeat(3, 100); // Repeat the packet three times with 100ms delay between
+  WOL.setBroadcastAddress("192.168.1.255");
 
   connectToMQTT();
 }
@@ -81,8 +91,17 @@ void sendToMQTT() {
 }
 
 void messageHandler(String &topic, String &payload) {
-  Serial.println("ESP32 - received from MQTT:");
-  Serial.println("- topic: " + topic);
-  Serial.println("- payload:");
-  Serial.println(payload);
+  // Serial.println("ESP32 - received from MQTT:");
+  // Serial.println("- topic: " + topic);
+  // Serial.println("- payload:");
+  // Serial.println(payload);
+  if (topic == WAKE_ON_LAN_TOPIC) {
+    wakeOnLan(payload);
+  }
+}
+
+void wakeOnLan(String &message) {
+  if (message == WAKE_ON_LAN_MESSAGE) {
+    WOL.sendMagicPacket(PC_MAC_ADDRESS);
+  }
 }
