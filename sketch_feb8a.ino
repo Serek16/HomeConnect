@@ -21,15 +21,16 @@ unsigned long lastPublishTime = 0;
 
 void setup() {
   Serial.begin(115200);
+  delay(1000);
   Serial.println();
 
   WiFi.begin(SSID, PASS);
-  printf("Connecting to WiFi \"%s\"", SSID);
+  Serial.printf("Connecting to WiFi \"%s\"", SSID);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    printf(".");
+    Serial.printf(".");
   }
-  printf("\nSuccessfully connected\n");
+  Serial.printf("\nSuccessfully connected\n");
 
   wifiClient.setCACert(CA_CERT);
   wifiClient.setCertificate(CLIENT_CERT);
@@ -57,19 +58,18 @@ void connectToMQTT() {
   // Create a handler for incoming messages
   mqttClient.onMessage(messageHandler);
 
-  printf("Connecting to MQTT broker with address %s", MQTT_BROKER_ADRRESS);
+  Serial.printf("Connecting to MQTT broker with address %s", MQTT_BROKER_ADRRESS);
   while (!mqttClient.connect(MQTT_CLIENT_ID)) {
     delay(100);
-    printf(".");
+    Serial.printf(".");
   }
-
-  printf("\nMQTT broker Connected\n");
+  Serial.printf("\nMQTT broker Connected\n");
 
   // Subscribe to a topic, the incoming messages are processed by messageHandler() function
   if (mqttClient.subscribe(SUBSCRIBE_TOPIC))
-    printf("Subscribed to the topic: \"%s\"\n", SUBSCRIBE_TOPIC);
+    Serial.printf("Subscribed to the topic: \"%s\"\n", SUBSCRIBE_TOPIC);
   else
-    printf("Failed to subscribe to the topic: \"%s\"\n", SUBSCRIBE_TOPIC);
+    Serial.printf("Failed to subscribe to the topic: \"%s\"\n", SUBSCRIBE_TOPIC);
 }
 
 void sendToMQTT() {
@@ -81,15 +81,17 @@ void sendToMQTT() {
 
   mqttClient.publish(PUBLISH_TOPIC, messageBuffer);
 
-  printf("sent to MQTT:\n");
-  printf("- topic: \"%s\"\n", PUBLISH_TOPIC);
-  printf("- payload: \"%s\"\n", messageBuffer);
+  Serial.printf("sent to MQTT:\n"
+                "- topic: \"%s\"\n"
+                "- payload: \"%s\"\n",
+                 PUBLISH_TOPIC, messageBuffer);
 }
 
 void messageHandler(String &topic, String &message) {
-  printf("received from MQTT:\n");
-  printf("- topic: \"%s\"\n", topic);
-  printf("- message: \"%s\"\n", message);
+  Serial.printf("received from MQTT:\n"
+                "- topic: \"%s\"\n"
+                "- message: \"%s\"\n",
+                topic, message);
   if (topic == WAKE_ON_LAN_TOPIC) {
     wakeOnLan(message);
   }
@@ -98,6 +100,6 @@ void messageHandler(String &topic, String &message) {
 void wakeOnLan(String &message) {
   if (message == WAKE_ON_LAN_MESSAGE) {
     WOL.sendMagicPacket(PC_MAC_ADDRESS);
-    printf("Wake-on-LAN. Magic Packet was sent\n");
+    Serial.printf("Wake-on-LAN. Magic Packet was sent\n");
   }
 }
