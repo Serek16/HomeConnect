@@ -4,6 +4,8 @@
 #include <ArduinoJson.h>
 #include <WiFiUdp.h>
 #include <WakeOnLan.h>
+#include "USB.h"
+#include "USBHIDKeyboard.h"
 #include "MyCredentials.h"
 
 const int PUBLISH_INTERVAL = 5*60*1000; // 5 minutes
@@ -16,6 +18,8 @@ MQTTClient mqttClient = MQTTClient(256);
 
 WiFiUDP UDP;
 WakeOnLan WOL(UDP);
+
+USBHIDKeyboard Keyboard;
 
 unsigned long lastPublishTime = 0;
 
@@ -40,6 +44,10 @@ void setup() {
 
   WOL.setRepeat(3, 100); // Repeat the packet three times with 100ms delay between
   WOL.setBroadcastAddress("192.168.1.255");
+
+  Keyboard.begin();
+
+  pinMode(LED_BUILTIN, OUTPUT);
 }
 
 void loop() {
@@ -93,13 +101,58 @@ void messageHandler(String &topic, String &message) {
                 "- message: \"%s\"\n",
                 topic, message);
   if (topic == WAKE_ON_LAN_TOPIC) {
-    wakeOnLan(message);
+    if (wakeOnLan(message)) {
+      bootLinux();
+      if (!mqttClient.connected()) {
+        connectToMQTT();
+      }
+    }
   }
 }
 
-void wakeOnLan(String &message) {
+bool wakeOnLan(String &message) {
   if (message == WAKE_ON_LAN_MESSAGE) {
     WOL.sendMagicPacket(PC_MAC_ADDRESS);
     Serial.printf("Wake-on-LAN. Magic Packet was sent\n");
+    return true;
   }
+  return false;
+}
+
+void bootLinux() {
+  uint32_t f12_begin = millis();
+  uint32_t f12_duration = 15*1000; // 15 seconds
+
+  // Spam F12 to enter UEFI boot entry list
+  Serial.println("Entering UEFI boot entry list");
+  while (millis() - f12_begin < f12_duration) {
+    Keyboard.press(KEY_F12);
+    digitalWrite(LED_BUILTIN, digitalRead(LED_BUILTIN));
+    delay(100);
+    Keyboard.releaseAll();
+  }
+
+  // Choose UEFI 6th boot entry from
+  Serial.println("Choosing boot entry");
+  for (int i = 0; i < 5; i++) {
+    Keyboard.press(KEY_DOWN_ARROW);
+    digitalWrite(LED_BUILTIN, digitalRead(LED_BUILTIN));
+    delay(100);
+    Keyboard.releaseAll();
+  }
+
+  uint32_t enter_begin = millis();
+  uint32_t enter_duration = 3*1000; // 15 seconds
+
+  // Spam Enter to get past GRUB quicker
+  Serial.println("Enter spam");
+  while (millis() - enter_begin < enter_duration) {
+    Keyboard.press(KEY_KP_ENTER);
+    digitalWrite(LED_BUILTIN, digitalRead(LED_BUILTIN));
+    delay(100);
+    Keyboard.releaseAll();
+  }
+
+  digitalWrite(LED_BUILTIN, LOW);
+  Serial.println("Linux maybe successfully booted?");
 }
