@@ -10,9 +10,10 @@
 
 const int PUBLISH_INTERVAL = 5*60*1000; // 5 minutes
 
-const char* WAKE_ON_LAN_TOPIC   = "wake-on-lan";
-const char* WAKE_ON_LAN_MESSAGE = "on";
-const char* ALIVE_CHECK_TOPIC   = "alive";
+const char* WAKE_ON_LAN_TOPIC       = "wake-on-lan";
+const char* WAKE_ON_LAN_MESSAGE     = "on";
+const char* WAKE_ON_LAN_MESSAGE_ACK = "ack";
+const char* ALIVE_CHECK_TOPIC       = "alive";
 
 WiFiClientSecure wifiClient;
 MQTTClient mqttClient = MQTTClient(256);
@@ -52,9 +53,16 @@ void loop() {
   mqttClient.loop();
 
   if (millis() - lastPublishTime > PUBLISH_INTERVAL) {
-    sendToMQTT();
+    StaticJsonDocument<200> message;
+    message["timestamp"] = millis();
+    message["data"] = analogRead(0);  // Or you can read data from other sensors
+    char messageBuffer[512];
+    serializeJson(message, messageBuffer);
+    sendToMQTT(ALIVE_CHECK_TOPIC, messageBuffer);
     lastPublishTime = millis();
   }
+
+  delay(5000); // 5 seconds
 }
 
 void connectToMQTT() {
@@ -78,19 +86,12 @@ void connectToMQTT() {
     Serial.printf("Failed to subscribe to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC);
 }
 
-void sendToMQTT() {
-  StaticJsonDocument<200> message;
-  message["timestamp"] = millis();
-  message["data"] = analogRead(0);  // Or you can read data from other sensors
-  char messageBuffer[512];
-  serializeJson(message, messageBuffer);
-
-  mqttClient.publish(ALIVE_CHECK_TOPIC, messageBuffer);
-
+void sendToMQTT(const char* topic, const char* message) {
+  mqttClient.publish(topic, message);
   Serial.printf("sent to MQTT:\n"
                 "- topic: \"%s\"\n"
                 "- payload: \"%s\"\n",
-                 ALIVE_CHECK_TOPIC, messageBuffer);
+                 topic, message);
 }
 
 void messageHandler(String &topic, String &message) {
@@ -110,6 +111,7 @@ void messageHandler(String &topic, String &message) {
 
 bool wakeOnLan(String &message) {
   if (message == WAKE_ON_LAN_MESSAGE) {
+    sendToMQTT(WAKE_ON_LAN_TOPIC, WAKE_ON_LAN_MESSAGE_ACK);
     WOL.sendMagicPacket(PC_MAC_ADDRESS);
     Serial.printf("Wake-on-LAN. Magic Packet was sent\n");
     return true;
