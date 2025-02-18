@@ -12,6 +12,7 @@ const int PUBLISH_INTERVAL = 5*60*1000; // 5 minutes
 
 const char* WAKE_ON_LAN_TOPIC   = "wake-on-lan";
 const char* WAKE_ON_LAN_MESSAGE = "on";
+const char* ALIVE_CHECK_TOPIC   = "alive";
 
 WiFiClientSecure wifiClient;
 MQTTClient mqttClient = MQTTClient(256);
@@ -35,10 +36,7 @@ void setup() {
     Serial.printf(".");
   }
   Serial.printf("\nSuccessfully connected\n");
-
-  wifiClient.setCACert(CA_CERT);
-  wifiClient.setCertificate(CLIENT_CERT);
-  wifiClient.setPrivateKey(CLIENT_KEY);
+  wifiClient.setPreSharedKey(PSK_IDENT, PSK);
   
   connectToMQTT();
 
@@ -74,10 +72,10 @@ void connectToMQTT() {
   Serial.printf("\nMQTT broker Connected\n");
 
   // Subscribe to a topic, the incoming messages are processed by messageHandler() function
-  if (mqttClient.subscribe(SUBSCRIBE_TOPIC))
-    Serial.printf("Subscribed to the topic: \"%s\"\n", SUBSCRIBE_TOPIC);
+  if (mqttClient.subscribe(WAKE_ON_LAN_TOPIC))
+    Serial.printf("Subscribed to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC);
   else
-    Serial.printf("Failed to subscribe to the topic: \"%s\"\n", SUBSCRIBE_TOPIC);
+    Serial.printf("Failed to subscribe to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC);
 }
 
 void sendToMQTT() {
@@ -87,12 +85,12 @@ void sendToMQTT() {
   char messageBuffer[512];
   serializeJson(message, messageBuffer);
 
-  mqttClient.publish(PUBLISH_TOPIC, messageBuffer);
+  mqttClient.publish(ALIVE_CHECK_TOPIC, messageBuffer);
 
   Serial.printf("sent to MQTT:\n"
                 "- topic: \"%s\"\n"
                 "- payload: \"%s\"\n",
-                 PUBLISH_TOPIC, messageBuffer);
+                 ALIVE_CHECK_TOPIC, messageBuffer);
 }
 
 void messageHandler(String &topic, String &message) {
@@ -154,5 +152,5 @@ void bootLinux() {
   }
 
   digitalWrite(LED_BUILTIN, LOW);
-  Serial.println("Linux maybe successfully booted?");
+  Serial.println("Linux maybe? successfully booted");
 }
