@@ -1,3 +1,7 @@
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
 #include <WiFi.h>
 #include <MQTTClient.h>
 #include <WiFiClientSecure.h>
@@ -11,6 +15,7 @@
 const int PUBLISH_INTERVAL = 5*60*1000; // 5 minutes
 
 const char* WAKE_ON_LAN_TOPIC       = "wake-on-lan";
+const char* WAKE_ON_LAN_TOPIC_BNUM  = "wake-on-lan-boot-number";
 const char* WAKE_ON_LAN_MESSAGE     = "on";
 const char* WAKE_ON_LAN_MESSAGE_ACK = "ack";
 const char* ALIVE_CHECK_TOPIC       = "alive";
@@ -49,8 +54,18 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
 }
 
+uint32_t lastMqttCheck = millis();
+uint32_t mqttCheckInterval = 5*1*1000; // 5 seconds
 void loop() {
   mqttClient.loop();
+
+  if (millis() - lastMqttCheck >= mqttCheckInterval) {
+    lastMqttCheck = millis();
+    if (!mqttClient.connected()) {
+      Serial.println("Had to reconnect");
+      connectToMQTT();
+    }
+  }
 
   if (millis() - lastPublishTime > PUBLISH_INTERVAL) {
     StaticJsonDocument<200> message;
@@ -84,8 +99,14 @@ void connectToMQTT() {
     Serial.printf("Subscribed to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC);
   else
     Serial.printf("Failed to subscribe to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC);
+
+  if (mqttClient.subscribe(WAKE_ON_LAN_TOPIC_BNUM))
+    Serial.printf("Subscribed to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC_BNUM);
+  else
+    Serial.printf("Failed to subscribe to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC_BNUM);
 }
 
+// Send a message on given topic using mosquitto client
 void sendToMQTT(const char* topic, const char* message) {
   mqttClient.publish(topic, message);
   Serial.printf("sent to MQTT:\n"
@@ -94,14 +115,34 @@ void sendToMQTT(const char* topic, const char* message) {
                  topic, message);
 }
 
+// Subscription message handeler passed to mosquitto client
 void messageHandler(String &topic, String &message) {
   Serial.printf("received from MQTT:\n"
                 "- topic: \"%s\"\n"
                 "- message: \"%s\"\n",
                 topic, message);
+
+  // Use default second UEFI boot entry
   if (topic == WAKE_ON_LAN_TOPIC) {
-    if (wakeOnLan(message)) {
-      bootLinux();
+    if (message == WAKE_ON_LAN_MESSAGE) {
+      sendToMQTT(WAKE_ON_LAN_TOPIC, WAKE_ON_LAN_MESSAGE_ACK); // Send ack back
+      WOL.sendMagicPacket(PC_MAC_ADDRESS);                    // WoL - power on computer
+      Serial.println("Wake-on-LAN Magic Packet was sent.");
+      bootLinux(1); //second boot entry                       // Try to boot to Linux immediately after pc is powered on
+      if (!mqttClient.connected()) {
+        connectToMQTT();
+      }
+    }
+  }
+
+  // Use given number of UEFI boot entry
+  else if(topic == WAKE_ON_LAN_TOPIC_BNUM) {
+    long bootNumber;
+    if (parseIntWithSscanf(message, bootNumber)) {
+      sendToMQTT(WAKE_ON_LAN_TOPIC_BNUM, WAKE_ON_LAN_MESSAGE_ACK); // Send ack back
+      WOL.sendMagicPacket(PC_MAC_ADDRESS);                         // WoL - power on computer
+      Serial.println("Wake-on-LAN Magic Packet was sent.");
+      bootLinux(bootNumber);                                       // Try to boot to Linux immediately after pc is powered on
       if (!mqttClient.connected()) {
         connectToMQTT();
       }
@@ -109,17 +150,7 @@ void messageHandler(String &topic, String &message) {
   }
 }
 
-bool wakeOnLan(String &message) {
-  if (message == WAKE_ON_LAN_MESSAGE) {
-    sendToMQTT(WAKE_ON_LAN_TOPIC, WAKE_ON_LAN_MESSAGE_ACK);
-    WOL.sendMagicPacket(PC_MAC_ADDRESS);
-    Serial.printf("Wake-on-LAN. Magic Packet was sent\n");
-    return true;
-  }
-  return false;
-}
-
-void bootLinux() {
+void bootLinux(int bootNumber) {
   uint32_t f12_begin = millis();
   uint32_t f12_duration = 15*1000; // 15 seconds
 
@@ -132,9 +163,9 @@ void bootLinux() {
     Keyboard.releaseAll();
   }
 
-  // Choose UEFI 6th boot entry from
-  Serial.println("Choosing boot entry");
-  for (int i = 0; i < 5; i++) {
+  // Choose UEFI boot entry on given position
+  Serial.printf("Choosing %i boot entry.", bootNumber);
+  for (int i = 0; i < bootNumber; i++) {
     Keyboard.press(KEY_DOWN_ARROW);
     digitalWrite(LED_BUILTIN, digitalRead(LED_BUILTIN));
     delay(100);
@@ -145,7 +176,7 @@ void bootLinux() {
   uint32_t enter_duration = 3*1000; // 15 seconds
 
   // Spam Enter to get past GRUB quicker
-  Serial.println("Enter spam");
+  Serial.println("Enter spamming...");
   while (millis() - enter_begin < enter_duration) {
     Keyboard.press(KEY_KP_ENTER);
     digitalWrite(LED_BUILTIN, digitalRead(LED_BUILTIN));
@@ -154,5 +185,18 @@ void bootLinux() {
   }
 
   digitalWrite(LED_BUILTIN, LOW);
-  Serial.println("Linux maybe? successfully booted");
+  Serial.println("Linux ?maybe? successfully booted!");
+}
+
+
+bool parseIntWithSscanf(const String &s, long &out) {
+  // make a NUL-terminated copy
+  int len = s.length();
+  if (len == 0) return false;
+  char buf[len + 1];
+  s.toCharArray(buf, len + 1);
+
+  char extra;
+  int matched = sscanf(buf, " %ld %c", &out, &extra);
+  return (matched == 1);
 }
