@@ -46,7 +46,12 @@ void setup() {
   
   connectToMQTT();
 
-  WOL.setRepeat(3, 100); // Repeat the packet three times with 100ms delay between
+  // Create a handler for incoming messages
+  mqttClient.onMessage(messageHandler);
+
+  subscribeToMQTT();
+
+  WOL.setRepeat(3, 100); // Repeat the packet three times with 100 ms delay between
   WOL.setBroadcastAddress("192.168.1.255");
 
   Keyboard.begin();
@@ -81,11 +86,8 @@ void loop() {
 }
 
 void connectToMQTT() {
-  // Connect to the MQTT broker
+  // Innit connection to the MQTT broker
   mqttClient.begin(MQTT_BROKER_ADRRESS, MQTT_PORT, wifiClient);
-
-  // Create a handler for incoming messages
-  mqttClient.onMessage(messageHandler);
 
   Serial.printf("Connecting to MQTT broker with address %s", MQTT_BROKER_ADRRESS);
   while (!mqttClient.connect(MQTT_CLIENT_ID)) {
@@ -93,26 +95,6 @@ void connectToMQTT() {
     Serial.printf(".");
   }
   Serial.printf("\nMQTT broker Connected\n");
-
-  // Subscribe to a topic, the incoming messages are processed by messageHandler() function
-  if (mqttClient.subscribe(WAKE_ON_LAN_TOPIC))
-    Serial.printf("Subscribed to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC);
-  else
-    Serial.printf("Failed to subscribe to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC);
-
-  if (mqttClient.subscribe(WAKE_ON_LAN_TOPIC_BNUM))
-    Serial.printf("Subscribed to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC_BNUM);
-  else
-    Serial.printf("Failed to subscribe to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC_BNUM);
-}
-
-// Send a message on given topic using mosquitto client
-void sendToMQTT(const char* topic, const char* message) {
-  mqttClient.publish(topic, message);
-  Serial.printf("sent to MQTT:\n"
-                "- topic: \"%s\"\n"
-                "- payload: \"%s\"\n",
-                 topic, message);
 }
 
 // Subscription message handeler passed to mosquitto client
@@ -148,6 +130,28 @@ void messageHandler(String &topic, String &message) {
       }
     }
   }
+}
+
+void subscribeToMQTT() {
+  // Subscribe to a topic, the incoming messages are processed by messageHandler() function
+  if (mqttClient.subscribe(WAKE_ON_LAN_TOPIC))
+    Serial.printf("Subscribed to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC);
+  else
+    Serial.printf("Failed to subscribe to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC);
+
+  if (mqttClient.subscribe(WAKE_ON_LAN_TOPIC_BNUM))
+    Serial.printf("Subscribed to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC_BNUM);
+  else
+    Serial.printf("Failed to subscribe to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC_BNUM);
+}
+
+// Send a message on given topic using mosquitto client
+void sendToMQTT(const char* topic, const char* message) {
+  mqttClient.publish(topic, message);
+  Serial.printf("sent to MQTT:\n"
+                "- topic: \"%s\"\n"
+                "- payload: \"%s\"\n",
+                 topic, message);
 }
 
 void bootLinux(int bootNumber) {
