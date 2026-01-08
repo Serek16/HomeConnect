@@ -12,13 +12,13 @@
 #include "USBHIDKeyboard.h"
 #include "MyCredentials.h"
 
-const int PUBLISH_INTERVAL = 5*60*1000; // 5 minutes
-
 const char* WAKE_ON_LAN_TOPIC       = "wake-on-lan";
 const char* WAKE_ON_LAN_TOPIC_BNUM  = "wake-on-lan-boot-number";
 const char* WAKE_ON_LAN_MESSAGE     = "on";
 const char* WAKE_ON_LAN_MESSAGE_ACK = "ack";
-const char* ALIVE_CHECK_TOPIC       = "alive";
+
+const char* ALIVE_CHECK_TOPIC       = "alive-check";
+const char* ALIVE_CHECK_MESSAGE     = "check";
 
 WiFiClientSecure wifiClient;
 MQTTClient mqttClient = MQTTClient(256);
@@ -27,8 +27,6 @@ WiFiUDP UDP;
 WakeOnLan WOL(UDP);
 
 USBHIDKeyboard Keyboard;
-
-unsigned long lastPublishTime = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -71,17 +69,6 @@ void loop() {
       connectToMQTT();
     }
   }
-
-  if (millis() - lastPublishTime > PUBLISH_INTERVAL) {
-    StaticJsonDocument<200> message;
-    message["timestamp"] = millis();
-    message["data"] = analogRead(0);  // Or you can read data from other sensors
-    char messageBuffer[512];
-    serializeJson(message, messageBuffer);
-    sendToMQTT(ALIVE_CHECK_TOPIC, messageBuffer);
-    lastPublishTime = millis();
-  }
-
   delay(5000); // 5 seconds
 }
 
@@ -119,15 +106,24 @@ void messageHandler(String &topic, String &message) {
 
   // Use given number of UEFI boot entry
   else if(topic == WAKE_ON_LAN_TOPIC_BNUM) {
-    long bootNumber;
-    if (parseIntWithSscanf(message, bootNumber)) {
-      sendToMQTT(WAKE_ON_LAN_TOPIC_BNUM, WAKE_ON_LAN_MESSAGE_ACK); // Send ack back
-      WOL.sendMagicPacket(PC_MAC_ADDRESS);                         // WoL - power on computer
-      Serial.println("Wake-on-LAN Magic Packet was sent.");
-      bootLinux(bootNumber);                                       // Try to boot to Linux immediately after pc is powered on
-      if (!mqttClient.connected()) {
-        connectToMQTT();
+    if (message != "") {
+      long bootNumber;
+      if (parseIntWithSscanf(message, bootNumber)) {
+        sendToMQTT(WAKE_ON_LAN_TOPIC_BNUM, WAKE_ON_LAN_MESSAGE_ACK); // Send ack back
+        WOL.sendMagicPacket(PC_MAC_ADDRESS);                         // WoL - power on computer
+        Serial.println("Wake-on-LAN Magic Packet was sent.");
+        bootLinux(bootNumber);                                       // Try to boot to Linux immediately after pc is powered on
+        if (!mqttClient.connected()) {
+          connectToMQTT();
+        }
       }
+    }
+  }
+
+  else if(topic == ALIVE_CHECK_TOPIC) {
+    if (message == ALIVE_CHECK_MESSAGE) {
+      Serial.println("Manual alive check.");
+      sendToMQTT(ALIVE_CHECK_TOPIC, "alive!");
     }
   }
 }
@@ -143,6 +139,11 @@ void subscribeToMQTT() {
     Serial.printf("Subscribed to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC_BNUM);
   else
     Serial.printf("Failed to subscribe to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC_BNUM);
+
+  if (mqttClient.subscribe(ALIVE_CHECK_TOPIC))
+    Serial.printf("Subscribed to the topic: \"%s\"\n", ALIVE_CHECK_TOPIC);
+  else
+    Serial.printf("Failed to subscribe to the topic: \"%s\"\n", ALIVE_CHECK_TOPIC);
 }
 
 // Send a message on given topic using mosquitto client
