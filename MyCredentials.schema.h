@@ -10,8 +10,8 @@ const char* MQTT_BROKER_ADRRESS = "";
 const int   MQTT_PORT           = ;
 const char* MQTT_CLIENT_ID      = "";
 
-const char* PSK_IDENT = "";
-const char* PSK       = "";
+const char* MQTT_PSK_IDENT = "";
+const char* MQTT_PSK       = "";
 
 const char* PC_MAC_ADDRESS = "";
 

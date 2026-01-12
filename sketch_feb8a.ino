@@ -5,7 +5,6 @@
 #include <WiFi.h>
 #include <MQTTClient.h>
 #include <WiFiClientSecure.h>
-#include <ArduinoJson.h>
 #include <WiFiUdp.h>
 #include <WakeOnLan.h>
 #include "USB.h"
@@ -30,8 +29,8 @@ USBHIDKeyboard Keyboard;
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
-  Serial.println();
+  delay(1000);       // it helps the first message
+  Serial.println();  //  not to be trimmed
 
   WiFi.begin(SSID, PASS);
   Serial.printf("Connecting to WiFi \"%s\"", SSID);
@@ -40,13 +39,11 @@ void setup() {
     Serial.printf(".");
   }
   Serial.printf("\nSuccessfully connected\n");
-  wifiClient.setPreSharedKey(PSK_IDENT, PSK);
-  
+  WiFi.setSleep(true); // modem sleep - WiFi still connected & MQTT still works
+
+  wifiClient.setPreSharedKey(MQTT_PSK_IDENT, MQTT_PSK); // set MQTT credentials
   connectToMQTT();
-
-  // Create a handler for incoming messages
   mqttClient.onMessage(messageHandler);
-
   subscribeToMQTT();
 
   WOL.setRepeat(3, 100); // Repeat the packet three times with 100 ms delay between
@@ -65,11 +62,14 @@ void loop() {
   if (millis() - lastMqttCheck >= mqttCheckInterval) {
     lastMqttCheck = millis();
     if (!mqttClient.connected()) {
-      Serial.println("Had to reconnect");
+      Serial.println("Have to reconnect...");
+      if (WiFi.status() != WL_CONNECTED) {
+        WiFi.reconnect();
+      }
       connectToMQTT();
+      subscribeToMQTT();
     }
   }
-  delay(5000); // 5 seconds
 }
 
 void connectToMQTT() {
@@ -98,9 +98,6 @@ void messageHandler(String &topic, String &message) {
       WOL.sendMagicPacket(PC_MAC_ADDRESS);                    // WoL - power on computer
       Serial.println("Wake-on-LAN Magic Packet was sent.");
       bootLinux(1); //second boot entry                       // Try to boot to Linux immediately after pc is powered on
-      if (!mqttClient.connected()) {
-        connectToMQTT();
-      }
     }
   }
 
@@ -113,9 +110,6 @@ void messageHandler(String &topic, String &message) {
         WOL.sendMagicPacket(PC_MAC_ADDRESS);                         // WoL - power on computer
         Serial.println("Wake-on-LAN Magic Packet was sent.");
         bootLinux(bootNumber);                                       // Try to boot to Linux immediately after pc is powered on
-        if (!mqttClient.connected()) {
-          connectToMQTT();
-        }
       }
     }
   }
@@ -128,8 +122,8 @@ void messageHandler(String &topic, String &message) {
   }
 }
 
+// Subscribe to a topic, the incoming messages are processed by messageHandler() function
 void subscribeToMQTT() {
-  // Subscribe to a topic, the incoming messages are processed by messageHandler() function
   if (mqttClient.subscribe(WAKE_ON_LAN_TOPIC))
     Serial.printf("Subscribed to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC);
   else
