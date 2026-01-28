@@ -2,17 +2,22 @@
 #ifndef MYCREDENTIALS_H
 #define MYCREDENTIALS_H
 
-const char* SSID = "";
-const char* PASS = "";
+// WiFi Configuration
+const char* WIFI_SSID = "";
+const char* WIFI_PASS = "";
 
-//const char* MQTT_BROKER_ADRRESS = "test.mosquitto.org";
-const char* MQTT_BROKER_ADRRESS = "";
+// MQTT Broker settings
+const char* MQTT_BROKER_ADDRESS = "";
 const int   MQTT_PORT           = ;
 const char* MQTT_CLIENT_ID      = "";
 
+// MQTT PSK credentials (for TLS-PSK authentication)
 const char* MQTT_PSK_IDENT = "";
 const char* MQTT_PSK       = "";
 
-const char* PC_MAC_ADDRESS = "";
+// Wake-on-LAN settings
+const char* PC_MAC_ADDRESS  = "";
+const int   WOL_PORT        = ;
+const char* PC_BROADCAST_IP = "";
 
 #endif

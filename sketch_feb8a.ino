@@ -1,201 +1,167 @@
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <ctype.h>
 #include <WiFi.h>
 #include <MQTTClient.h>
 #include <WiFiClientSecure.h>
-#include <WiFiUdp.h>
-#include <WakeOnLan.h>
-#include "USB.h"
-#include "USBHIDKeyboard.h"
+#include <USBHIDKeyboard.h>
+
 #include "MyCredentials.h"
+#include "PCPower.h"
+#include "MQTTManager.h"
 
-const char* WAKE_ON_LAN_TOPIC       = "wake-on-lan";
-const char* WAKE_ON_LAN_TOPIC_BNUM  = "wake-on-lan-boot-number";
-const char* WAKE_ON_LAN_MESSAGE     = "on";
-const char* WAKE_ON_LAN_MESSAGE_ACK = "ack";
-
-const char* ALIVE_CHECK_TOPIC       = "alive-check";
-const char* ALIVE_CHECK_MESSAGE     = "check";
-
-WiFiClientSecure wifiClient;
-MQTTClient mqttClient = MQTTClient(256);
-
-WiFiUDP UDP;
-WakeOnLan WOL(UDP);
+const char* MQTT_COMMAND_TOPIC       = "ssh-home";
+const char* PC_ON_MESSAGE            = "pc-on";
+const char* PC_ON_BNUM_MESSAGE       = "pc-on_";
+const char* PC_OFF_MESSAGE           = "pc-off";
+const char* PC_CHECK_MESSAGE         = "pc-check";
+const char* MQTT_COMMAND_ACK_MESSAGE = "ack";
+const char* ESP_CHECK_MESSAGE        = "esp-check";
 
 USBHIDKeyboard Keyboard;
+
+const uint8_t POWER_SW_PIN  = 18;
+const uint8_t POWER_LED_PIN = 33;
+PCPower pc(POWER_SW_PIN, POWER_LED_PIN);
+
+#include "MQTTManager.h"
+MQTTManager mqtt(MQTT_BROKER_ADDRESS, MQTT_PORT, MQTT_CLIENT_ID, MQTT_PSK_IDENT, MQTT_PSK);
 
 void setup() {
   Serial.begin(115200);
   delay(1000);       // it helps the first message
   Serial.println();  //  not to be trimmed
 
-  WiFi.begin(SSID, PASS);
-  Serial.printf("Connecting to WiFi \"%s\"", SSID);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.printf(".");
-  }
-  Serial.printf("\nSuccessfully connected\n");
-  WiFi.setSleep(true); // modem sleep - WiFi still connected & MQTT still works
+  connectWiFi();
 
-  wifiClient.setPreSharedKey(MQTT_PSK_IDENT, MQTT_PSK); // set MQTT credentials
-  connectToMQTT();
-  mqttClient.onMessage(messageHandler);
-  subscribeToMQTT();
-
-  WOL.setRepeat(3, 100); // Repeat the packet three times with 100 ms delay between
-  WOL.setBroadcastAddress("192.168.1.255");
+  mqtt.begin();
+  mqtt.setMessageCallback(onMQTTMessage);
+  mqtt.subscribe(MQTT_COMMAND_TOPIC);
 
   Keyboard.begin();
 
-  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(POWER_SW_PIN, OUTPUT);
+  pinMode(POWER_LED_PIN, INPUT);
 }
 
-uint32_t lastMqttCheck = millis();
-uint32_t mqttCheckInterval = 5*1*1000; // 5 seconds
 void loop() {
-  mqttClient.loop();
-
-  if (millis() - lastMqttCheck >= mqttCheckInterval) {
-    lastMqttCheck = millis();
-    if (!mqttClient.connected()) {
-      Serial.println("Have to reconnect...");
-      if (WiFi.status() != WL_CONNECTED) {
-        WiFi.reconnect();
-      }
-      connectToMQTT();
-      subscribeToMQTT();
-    }
-  }
-}
-
-void connectToMQTT() {
-  // Innit connection to the MQTT broker
-  mqttClient.begin(MQTT_BROKER_ADRRESS, MQTT_PORT, wifiClient);
-
-  Serial.printf("Connecting to MQTT broker with address %s", MQTT_BROKER_ADRRESS);
-  while (!mqttClient.connect(MQTT_CLIENT_ID)) {
-    delay(100);
-    Serial.printf(".");
-  }
-  Serial.printf("\nMQTT broker Connected\n");
-}
-
-// Subscription message handeler passed to mosquitto client
-void messageHandler(String &topic, String &message) {
-  Serial.printf("received from MQTT:\n"
-                "- topic: \"%s\"\n"
-                "- message: \"%s\"\n",
-                topic, message);
-
-  // Use default second UEFI boot entry
-  if (topic == WAKE_ON_LAN_TOPIC) {
-    if (message == WAKE_ON_LAN_MESSAGE) {
-      sendToMQTT(WAKE_ON_LAN_TOPIC, WAKE_ON_LAN_MESSAGE_ACK); // Send ack back
-      WOL.sendMagicPacket(PC_MAC_ADDRESS);                    // WoL - power on computer
-      Serial.println("Wake-on-LAN Magic Packet was sent.");
-      bootLinux(1); //second boot entry                       // Try to boot to Linux immediately after pc is powered on
-    }
-  }
-
-  // Use given number of UEFI boot entry
-  else if(topic == WAKE_ON_LAN_TOPIC_BNUM) {
-    if (message != "") {
-      long bootNumber;
-      if (parseIntWithSscanf(message, bootNumber)) {
-        sendToMQTT(WAKE_ON_LAN_TOPIC_BNUM, WAKE_ON_LAN_MESSAGE_ACK); // Send ack back
-        WOL.sendMagicPacket(PC_MAC_ADDRESS);                         // WoL - power on computer
-        Serial.println("Wake-on-LAN Magic Packet was sent.");
-        bootLinux(bootNumber);                                       // Try to boot to Linux immediately after pc is powered on
-      }
-    }
-  }
-
-  else if(topic == ALIVE_CHECK_TOPIC) {
-    if (message == ALIVE_CHECK_MESSAGE) {
-      Serial.println("Manual alive check.");
-      sendToMQTT(ALIVE_CHECK_TOPIC, "alive!");
-    }
-  }
-}
-
-// Subscribe to a topic, the incoming messages are processed by messageHandler() function
-void subscribeToMQTT() {
-  if (mqttClient.subscribe(WAKE_ON_LAN_TOPIC))
-    Serial.printf("Subscribed to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC);
+  if (WiFi.status() == WL_CONNECTED)
+    mqtt.tick();
   else
-    Serial.printf("Failed to subscribe to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC);
-
-  if (mqttClient.subscribe(WAKE_ON_LAN_TOPIC_BNUM))
-    Serial.printf("Subscribed to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC_BNUM);
-  else
-    Serial.printf("Failed to subscribe to the topic: \"%s\"\n", WAKE_ON_LAN_TOPIC_BNUM);
-
-  if (mqttClient.subscribe(ALIVE_CHECK_TOPIC))
-    Serial.printf("Subscribed to the topic: \"%s\"\n", ALIVE_CHECK_TOPIC);
-  else
-    Serial.printf("Failed to subscribe to the topic: \"%s\"\n", ALIVE_CHECK_TOPIC);
+    connectWiFi();
+  delay(10);
 }
 
-// Send a message on given topic using mosquitto client
-void sendToMQTT(const char* topic, const char* message) {
-  mqttClient.publish(topic, message);
-  Serial.printf("sent to MQTT:\n"
-                "- topic: \"%s\"\n"
-                "- payload: \"%s\"\n",
-                 topic, message);
+void connectWiFi() {
+  Serial.printf("Connecting to WiFi: %s\n", WIFI_SSID);
+  
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi connected.");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\nWiFi connection failed! Retrying in 5 seconds.");
+    delay(5000);
+    connectWiFi();
+  }
 }
 
-void bootLinux(int bootNumber) {
-  uint32_t f12_begin = millis();
-  uint32_t f12_duration = 15*1000; // 15 seconds
+void mqttReportPCState() {
+  bool state = pc.isOn();
+  Serial.println(state ? "PC is ON." : "PC is OFF.");
+  mqtt.publish(MQTT_COMMAND_TOPIC, state ? "PC is ON." : "PC is OFF.");
+}
 
-  // Spam F12 to enter UEFI boot entry list
-  Serial.println("Entering UEFI boot entry list");
-  while (millis() - f12_begin < f12_duration) {
+int readBootNum(String str) {
+  int i = str.lastIndexOf("_");
+  if (i == -1) return 0;
+  String sInt = str.substring(i+1);
+  if (sInt.isEmpty()) return 0;
+  return sInt.toInt();
+}
+
+void onMQTTMessage(String topic, String payload) {
+  if (topic == MQTT_COMMAND_TOPIC)
+    handleCommand(payload);
+}
+
+void handleCommand(String &command) {
+  if (command == PC_ON_MESSAGE) {
+    if (pc.isOn()) {
+      Serial.println("PC is already ON.");
+      mqtt.publish(MQTT_COMMAND_TOPIC, "PC is already ON.");
+      return;
+    }
+    Serial.println("PC is turning on...");
+    mqtt.publish(MQTT_COMMAND_TOPIC, "PC is turning on...");
+    pc.pressShort();
+  }
+  else if (command.startsWith(PC_ON_BNUM_MESSAGE)) {
+    if (pc.isOn()) {
+      Serial.println("PC is already ON.");
+      mqtt.publish(MQTT_COMMAND_TOPIC, "PC is already ON.");
+      return;
+    }
+    Serial.println("PC is turning on...");
+    mqtt.publish(MQTT_COMMAND_TOPIC, "PC is turning on...");
+    pc.pressShort();
+    bootOS(readBootNum(command));
+  }
+  else if (command == PC_OFF_MESSAGE) {
+    if (!pc.isOn()) {
+      Serial.println("PC is already OFF.");
+      mqtt.publish(MQTT_COMMAND_TOPIC, "PC is already OFF.");
+      return;
+    }
+    Serial.println("PC is turning off...");
+    mqtt.publish(MQTT_COMMAND_TOPIC, "PC is turning off...");
+    pc.pressLong();
+    delay(500);
+    mqttReportPCState();
+  }
+  else if (command == PC_CHECK_MESSAGE) {
+    mqttReportPCState();
+  }
+  else if (command == ESP_CHECK_MESSAGE) {
+    Serial.println("ESP is ON.");
+    mqtt.publish(MQTT_COMMAND_TOPIC, "ESP is ON.");
+    mqtt.publish(MQTT_COMMAND_TOPIC, MQTT_COMMAND_ACK_MESSAGE);
+  }
+}
+
+void bootOS(int bootNumber) {
+  Serial.printf("Booting OS No. $d from UEFI Boot Entry List.\n", bootNumber);
+  mqtt.publish(MQTT_COMMAND_TOPIC, String("Booting OS No. " + String(bootNumber)).c_str());
+  // Start spamming boot menu key - F12
+  uint32_t start = millis();
+  while (millis() - start < 15000) {
     Keyboard.press(KEY_F12);
-    digitalWrite(LED_BUILTIN, digitalRead(LED_BUILTIN));
-    delay(100);
+    delay(50);
     Keyboard.releaseAll();
+    delay(50);
   }
 
-  // Choose UEFI boot entry on given position
-  Serial.printf("Choosing %i boot entry.", bootNumber);
+  // Use down arrow to choose specific boot entry from the list
   for (int i = 0; i < bootNumber; i++) {
     Keyboard.press(KEY_DOWN_ARROW);
-    digitalWrite(LED_BUILTIN, digitalRead(LED_BUILTIN));
-    delay(100);
+    delay(50);
     Keyboard.releaseAll();
+    delay(50);
   }
 
-  uint32_t enter_begin = millis();
-  uint32_t enter_duration = 3*1000; // 15 seconds
-
-  // Spam Enter to get past GRUB quicker
-  Serial.println("Enter spamming...");
-  while (millis() - enter_begin < enter_duration) {
+  // Accept UEFI boot mntry and GRUB default boot entry
+  start = millis();
+  while (millis() - start < 5000) {
+    // Accept using Enter
     Keyboard.press(KEY_KP_ENTER);
-    digitalWrite(LED_BUILTIN, digitalRead(LED_BUILTIN));
-    delay(100);
+    delay(50);
     Keyboard.releaseAll();
+    delay(50);
   }
-
-  digitalWrite(LED_BUILTIN, LOW);
-  Serial.println("Linux ?maybe? successfully booted!");
-}
-
-
-bool parseIntWithSscanf(const String &s, long &out) {
-  // make a NUL-terminated copy
-  int len = s.length();
-  if (len == 0) return false;
-  char buf[len + 1];
-  s.toCharArray(buf, len + 1);
-
-  char extra;
-  int matched = sscanf(buf, " %ld %c", &out, &extra);
-  return (matched == 1);
 }
