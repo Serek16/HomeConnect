@@ -7,7 +7,8 @@
 #include "PCPower.h"
 #include "MQTTManager.h"
 
-const char* MQTT_COMMAND_TOPIC       = "ssh-home";
+const char* MQTT_COMMAND_TOPIC       = "ssh-home-cmd";
+const char* MQTT_RESPONSE_TOPIC      = "ssh-home-res";
 const char* PC_ON_MESSAGE            = "pc-on";
 const char* PC_ON_BNUM_MESSAGE       = "pc-on_";
 const char* PC_OFF_MESSAGE           = "pc-off";
@@ -72,10 +73,14 @@ void connectWiFi() {
   }
 }
 
+void mqttResponse(const char* message) {
+  mqtt.publish(MQTT_RESPONSE_TOPIC, message);
+}
+
 void mqttReportPCState() {
   bool state = pc.isOn();
   Serial.println(state ? "PC is ON." : "PC is OFF.");
-  mqtt.publish(MQTT_COMMAND_TOPIC, state ? "PC is ON." : "PC is OFF.");
+  mqttResponse(state ? "PC is ON." : "PC is OFF.");
 }
 
 int readBootNum(String str) {
@@ -95,49 +100,47 @@ void handleCommand(String &command) {
   if (command == PC_ON_MESSAGE) {
     if (pc.isOn()) {
       Serial.println("PC is already ON.");
-      mqtt.publish(MQTT_COMMAND_TOPIC, "PC is already ON.");
+      mqttResponse("PC is already ON.");
       return;
     }
     Serial.println("PC is turning on...");
-    mqtt.publish(MQTT_COMMAND_TOPIC, "PC is turning on...");
+    mqttResponse("PC is turning on...");
     pc.pressShort();
   }
   else if (command.startsWith(PC_ON_BNUM_MESSAGE)) {
     if (pc.isOn()) {
       Serial.println("PC is already ON.");
-      mqtt.publish(MQTT_COMMAND_TOPIC, "PC is already ON.");
+      mqttResponse("PC is already ON.");
       return;
     }
     Serial.println("PC is turning on...");
-    mqtt.publish(MQTT_COMMAND_TOPIC, "PC is turning on...");
+    mqttResponse("PC is turning on...");
     pc.pressShort();
     bootOS(readBootNum(command));
   }
   else if (command == PC_OFF_MESSAGE) {
     if (!pc.isOn()) {
       Serial.println("PC is already OFF.");
-      mqtt.publish(MQTT_COMMAND_TOPIC, "PC is already OFF.");
+      mqttResponse("PC is already OFF.");
       return;
     }
     Serial.println("PC is turning off...");
-    mqtt.publish(MQTT_COMMAND_TOPIC, "PC is turning off...");
+    mqttResponse("PC is turning off...");
     pc.pressLong();
-    delay(500);
-    mqttReportPCState();
   }
   else if (command == PC_CHECK_MESSAGE) {
     mqttReportPCState();
   }
   else if (command == ESP_CHECK_MESSAGE) {
     Serial.println("ESP is ON.");
-    mqtt.publish(MQTT_COMMAND_TOPIC, "ESP is ON.");
-    mqtt.publish(MQTT_COMMAND_TOPIC, MQTT_COMMAND_ACK_MESSAGE);
+    mqttResponse("ESP is ON.");
+    mqttResponse(MQTT_COMMAND_ACK_MESSAGE);
   }
 }
 
 void bootOS(int bootNumber) {
   Serial.printf("Booting OS No. $d from UEFI Boot Entry List.\n", bootNumber);
-  mqtt.publish(MQTT_COMMAND_TOPIC, String("Booting OS No. " + String(bootNumber)).c_str());
+  mqttResponse(String("Booting OS No. " + String(bootNumber)).c_str());
   // Start spamming boot menu key - F12
   uint32_t start = millis();
   while (millis() - start < 15000) {
