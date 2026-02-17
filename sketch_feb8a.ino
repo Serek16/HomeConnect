@@ -1,11 +1,9 @@
-#include <WiFi.h>
-#include <MQTTClient.h>
-#include <WiFiClientSecure.h>
-#include <USBHIDKeyboard.h>
-
 #include "MyCredentials.h"
-#include "PCPower.h"
+#include "WiFiManager.h"
 #include "MQTTManager.h"
+#include "PCPower.h"
+
+#include <USBHIDKeyboard.h>
 
 const char* MQTT_COMMAND_TOPIC       = "ssh-home-cmd";
 const char* MQTT_RESPONSE_TOPIC      = "ssh-home-res";
@@ -15,22 +13,26 @@ const char* PC_OFF_MESSAGE           = "pc-off";
 const char* PC_CHECK_MESSAGE         = "pc-check";
 const char* MQTT_COMMAND_ACK_MESSAGE = "ack";
 const char* ESP_CHECK_MESSAGE        = "esp-check";
+const char* WIFI_ADD_MESSAGE         = "wifi-add_";
+const char* WIFI_REMOVE_MESSAGE      = "wifi-remove_";
+const char* WIFI_LIST_MESSAGE        = "wifi-list";
+const char* WIFI_CURRENT_MESSAGE     = "wifi-current";
 
-USBHIDKeyboard Keyboard;
+WiFiManager wifi;
+MQTTManager mqtt(MQTT_BROKER_ADDRESS, MQTT_PORT, MQTT_CLIENT_ID, MQTT_PSK_IDENT, MQTT_PSK);
 
 const uint8_t POWER_SW_PIN  = 18;
 const uint8_t POWER_LED_PIN = 33;
 PCPower pc(POWER_SW_PIN, POWER_LED_PIN);
 
-#include "MQTTManager.h"
-MQTTManager mqtt(MQTT_BROKER_ADDRESS, MQTT_PORT, MQTT_CLIENT_ID, MQTT_PSK_IDENT, MQTT_PSK);
+USBHIDKeyboard Keyboard;
 
 void setup() {
   Serial.begin(115200);
   delay(1000);       // it helps the first message
   Serial.println();  //  not to be trimmed
 
-  connectWiFi();
+  wifi.begin(WIFI_SSID, WIFI_PASS);
 
   mqtt.begin();
   mqtt.setMessageCallback(onMQTTMessage);
@@ -43,34 +45,11 @@ void setup() {
 }
 
 void loop() {
-  if (WiFi.status() == WL_CONNECTED)
+  if (wifi.isConnected())
     mqtt.tick();
   else
-    connectWiFi();
+    wifi.connectWiFi();
   delay(10);
-}
-
-void connectWiFi() {
-  Serial.printf("Connecting to WiFi: %s\n", WIFI_SSID);
-  
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
-  }
-  
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi connected.");
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("\nWiFi connection failed! Retrying in 5 seconds.");
-    delay(5000);
-    connectWiFi();
-  }
 }
 
 void mqttResponse(const char* message) {
@@ -135,6 +114,36 @@ void handleCommand(String &command) {
     Serial.println("ESP is ON.");
     mqttResponse("ESP is ON.");
     mqttResponse(MQTT_COMMAND_ACK_MESSAGE);
+  }
+  else if (command.startsWith(WIFI_ADD_MESSAGE)) {
+    int sep = command.indexOf('\n');
+    if (sep == -1) {
+      Serial.println("Couldn't add WiFi");
+      mqttResponse("Couldn't add WiFi");
+    }
+    int cmdSep = strlen(WIFI_ADD_MESSAGE);
+    String ssid = command.substring(cmdSep, sep);
+    String pass = command.substring(sep + 1);
+    bool res = wifi.addWiFi(ssid, pass);
+    Serial.println(res ? "WiFi added" : "Couldn't add WiFi");
+    mqttResponse(res ? "WiFi added" : "Couldn't add WiFi");
+  }
+  else if (command.startsWith(WIFI_REMOVE_MESSAGE)) {
+    int cmdSep = strlen(WIFI_REMOVE_MESSAGE);
+    String ssid = command.substring(cmdSep);
+    bool res = wifi.removeWiFi(ssid);
+    Serial.println(res ? "WiFi deleted" : "Couldn't delete WiFi");
+    mqttResponse(res ? "WiFi deleted" : "Couldn't delete WiFi");
+  }
+  else if (command == WIFI_LIST_MESSAGE) {
+    String res = wifi.stringWiFi();
+    Serial.println(res);
+    mqttResponse(res.c_str());
+  }
+  else if (command == WIFI_CURRENT_MESSAGE) {
+    String curSsid = wifi.getCurSsid();
+    Serial.println(curSsid);
+    mqttResponse(curSsid.c_str());
   }
 }
 
