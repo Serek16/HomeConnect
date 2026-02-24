@@ -3,6 +3,8 @@
 #include "MQTTManager.h"
 #include "PCPower.h"
 
+#include <WiFiUdp.h>
+#include <WakeOnLan.h>
 #include <USBHIDKeyboard.h>
 #include <ArduinoOTA.h>
 
@@ -18,6 +20,8 @@ const char* WIFI_ADD_MESSAGE         = "wifi-add_";
 const char* WIFI_REMOVE_MESSAGE      = "wifi-remove_";
 const char* WIFI_LIST_MESSAGE        = "wifi-list";
 const char* WIFI_CURRENT_MESSAGE     = "wifi-current";
+const char* PC_WOL_MESSAGE           = "pc-wol";
+const char* PC_WOL_BNUM_MESSAGE      = "pc-wol_";
 
 WiFiManager wifi;
 MQTTManager mqtt(MQTT_BROKER_ADDRESS, MQTT_PORT, MQTT_CLIENT_ID, MQTT_PSK_IDENT, MQTT_PSK);
@@ -25,6 +29,9 @@ MQTTManager mqtt(MQTT_BROKER_ADDRESS, MQTT_PORT, MQTT_CLIENT_ID, MQTT_PSK_IDENT,
 const uint8_t POWER_SW_PIN  = 18;
 const uint8_t POWER_LED_PIN = 33;
 PCPower pc(POWER_SW_PIN, POWER_LED_PIN);
+
+WiFiUDP UDP;
+WakeOnLan WOL(UDP);
 
 USBHIDKeyboard Keyboard;
 
@@ -38,6 +45,9 @@ void setup() {
   mqtt.begin();
   mqtt.setMessageCallback(onMQTTMessage);
   mqtt.subscribe(MQTT_COMMAND_TOPIC);
+
+  WOL.setRepeat(3, 100); // Repeat the packet three times with 100 ms delay between
+  WOL.setBroadcastAddress(WOL_BROADCAST_IP);
 
   Keyboard.begin();
 
@@ -147,6 +157,17 @@ void handleCommand(String &command) {
     String curSsid = wifi.getCurSsid();
     Serial.println(curSsid);
     mqttResponse(curSsid.c_str());
+  }
+  else if (command == PC_WOL_MESSAGE) {
+    WOL.sendMagicPacket(PC_MAC_ADDRESS);
+    Serial.println("Wake-on-LAN Magic Packet was sent.");
+    mqttResponse("Wake-on-LAN Magic Packet was sent.");
+  }
+  else if (command.startsWith(PC_WOL_BNUM_MESSAGE)) {
+    WOL.sendMagicPacket(PC_MAC_ADDRESS);
+    Serial.println("Wake-on-LAN Magic Packet was sent.");
+    mqttResponse("Wake-on-LAN Magic Packet was sent.");
+    bootOS(readBootNum(command));
   }
 }
 

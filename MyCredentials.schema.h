@@ -16,8 +16,8 @@ const char* MQTT_PSK_IDENT = "";
 const char* MQTT_PSK       = "";
 
 // Wake-on-LAN settings
-const char* PC_MAC_ADDRESS  = "";
-const int   WOL_PORT        = ;
-const char* PC_BROADCAST_IP = "";
+const char* PC_MAC_ADDRESS   = "";
+const int   WOL_PORT         = ;
+const char* WOL_BROADCAST_IP = "";
 
 #endif
